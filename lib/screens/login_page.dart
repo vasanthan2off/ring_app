@@ -87,7 +87,7 @@ class _LoginPageState extends State<LoginPage> {
                 Center(
                   child: Image.asset(
                     'assets/images/login.png',
-                    height: 180,
+                    height: MediaQuery.of(context).size.height * 0.4,
                     fit: BoxFit.contain,
                   ),
                 ),
@@ -117,6 +117,7 @@ class _LoginPageState extends State<LoginPage> {
                 // ✅ Password field
                 CustomPasswordField(
                   controller: passwordController,
+                  validator: Validators.password,
                   textInputAction: TextInputAction.done,
                   onFieldSubmitted: (_) =>
                   !_loading ? _onLogin() : null, // Press enter to login

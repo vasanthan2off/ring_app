@@ -9,7 +9,6 @@ class Validators {
   static String? password(String? v) {
     if (v == null || v.isEmpty) return "Password is required";
     if (v.length < 6) return "At least 6 characters";
-    if(!RegExp(r'[A-Z]').hasMatch(v.trim())) return "At lease one uppercase letter";
     return null;
   }
 

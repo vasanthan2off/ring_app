@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import '../services/auth_service.dart';
 import '../widgets/custom_button.dart';
-import '../services/ring_data_provider.dart';
 
 class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+  final BluetoothDevice device; // ✅ passed from BluetoothConnectPage
+  const HomePage({super.key, required this.device});
+
   @override
   State<HomePage> createState() => _HomePageState();
 }
@@ -14,38 +15,80 @@ class _HomePageState extends State<HomePage> {
   Map<String, dynamic>? user;
   int _currentIndex = 0;
 
+  // BLE values
+  String _deviceName = "";
+  String _statusMessage = "Connecting...";
+  int _heartRate = 0;
+
   @override
   void initState() {
     super.initState();
-    _load();
+    _loadUser();
+    _connectToDevice();
   }
 
-  Future<void> _load() async {
+  Future<void> _loadUser() async {
     try {
       final u = await AuthService.instance.me();
       if (mounted) setState(() => user = u);
-    } catch (e) {
+    } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.toString()), backgroundColor: Colors.red),
-        );
         Navigator.pushNamedAndRemoveUntil(context, '/login', (_) => false);
       }
     }
   }
 
-  Future<void> _logout() async {
+  Future<void> _connectToDevice() async {
     try {
-      await AuthService.instance.logout();
-    } catch (_) {}
-    if (!mounted) return;
-    Navigator.pushNamedAndRemoveUntil(context, '/login', (_) => false);
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text("Logged out successfully"),
-        backgroundColor: Colors.green,
-      ),
-    );
+      await widget.device.connect(autoConnect: false);
+      setState(() => _statusMessage = "Connected ✅");
+
+      final services = await widget.device.discoverServices();
+
+      for (var service in services) {
+        // ✅ Try to read Device Name (0x2A00 inside Device Info Service 0x180A)
+        if (service.uuid.toString().toLowerCase().contains("180a")) {
+          for (var c in service.characteristics) {
+            if (c.uuid.toString().toLowerCase().contains("2a00")) {
+              final nameBytes = await c.read();
+              setState(() {
+                _deviceName = String.fromCharCodes(nameBytes);
+              });
+            }
+          }
+        }
+
+        // ✅ Heart Rate Service (0x180D) -> Measurement (0x2A37)
+        if (service.uuid.toString().toLowerCase().contains("180d")) {
+          for (var c in service.characteristics) {
+            if (c.uuid.toString().toLowerCase().contains("2a37")) {
+              await c.setNotifyValue(true);
+
+              c.lastValueStream.listen((value) {
+                if (value.isNotEmpty) {
+                  // Just take the first byte
+                  int bpm = value[0];
+                  debugPrint("Raw data from ring: $value -> BPM: $bpm");
+
+                  setState(() {
+                    _heartRate = bpm;
+                    _statusMessage = "Heart Rate: $bpm bpm";
+                  });
+                }
+              });
+            }
+          }
+        }
+      }
+    } catch (e) {
+      setState(() => _statusMessage = "Error: $e");
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.device.disconnect();
+    super.dispose();
   }
 
   String _getGreeting() {
@@ -55,7 +98,8 @@ class _HomePageState extends State<HomePage> {
     return "Good evening";
   }
 
-  Widget _infoCard(String title, String value, {bool isLarge = false}) {
+  Widget _infoCard(String title, String value,
+      {String suffix = "", bool isLarge = false}) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -77,7 +121,7 @@ class _HomePageState extends State<HomePage> {
               style: const TextStyle(fontSize: 14, color: Colors.black54)),
           const SizedBox(height: 6),
           Text(
-            value,
+            "$value$suffix",
             style: TextStyle(
               fontSize: isLarge ? 22 : 18,
               fontWeight: FontWeight.bold,
@@ -101,12 +145,15 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    // 👇 get ring data from provider
-    final ringData = Provider.of<RingDataProvider>(context);
-
     final fullName = (user != null)
         ? "${user!['first_name'] ?? ''} ${user!['last_name'] ?? ''}"
         : "Fetching...";
+
+    final titleName = _deviceName.isNotEmpty
+        ? _deviceName
+        : (widget.device.platformName.isNotEmpty
+        ? widget.device.platformName
+        : "Unknown Device");
 
     return Scaffold(
       backgroundColor: const Color(0xfff9f9f9),
@@ -118,8 +165,8 @@ class _HomePageState extends State<HomePage> {
           children: [
             Image.asset("assets/images/ring_logo.png", height: 32),
             const SizedBox(width: 8),
-            const Text("Depixel Ring",
-                style: TextStyle(color: Colors.black, fontSize: 16)),
+            Text(titleName,
+                style: const TextStyle(color: Colors.black, fontSize: 16)),
           ],
         ),
         actions: [
@@ -165,6 +212,11 @@ class _HomePageState extends State<HomePage> {
                 )
               ],
             ),
+
+            const SizedBox(height: 16),
+            Text("Status: $_statusMessage",
+                style: const TextStyle(color: Colors.grey)),
+
             const SizedBox(height: 24),
 
             /// Activity Section
@@ -172,32 +224,24 @@ class _HomePageState extends State<HomePage> {
             Row(
               children: [
                 Expanded(
-                  child: _infoCard(
-                    "Heart Rate",
-                    "${ringData.heartRate} bpm",
-                    isLarge: true,
-                  ),
+                  child: _infoCard("Heart Rate", "$_heartRate", suffix: " bpm", isLarge: true),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: _infoCard(
-                    "Steps",
-                    "${ringData.steps}",
-                    isLarge: true,
-                  ),
+                  child: _infoCard("Steps", "0", isLarge: true), // placeholder
                 ),
               ],
             ),
             const SizedBox(height: 24),
 
-            /// Sleep Section
+            /// Sleep Section (static placeholder)
             _sectionTitle("Sleep"),
             _infoCard("Sleep Score", "85", isLarge: true),
             const SizedBox(height: 24),
 
-            /// Ring Section
+            /// Ring Section (placeholder)
             _sectionTitle("Ring"),
-            _infoCard("Battery", "${ringData.batteryLevel}%", isLarge: true),
+            _infoCard("Battery", "0%", isLarge: true),
 
             const SizedBox(height: 32),
 
@@ -220,10 +264,27 @@ class _HomePageState extends State<HomePage> {
         type: BottomNavigationBarType.fixed,
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.home), label: "Home"),
-          BottomNavigationBarItem(icon: Icon(Icons.favorite_border), label: "Health"),
-          BottomNavigationBarItem(icon: Icon(Icons.chat_bubble_outline), label: "Chat"),
-          BottomNavigationBarItem(icon: Icon(Icons.person_outline), label: "Profile"),
+          BottomNavigationBarItem(
+              icon: Icon(Icons.favorite_border), label: "Health"),
+          BottomNavigationBarItem(
+              icon: Icon(Icons.chat_bubble_outline), label: "Chat"),
+          BottomNavigationBarItem(
+              icon: Icon(Icons.person_outline), label: "Profile"),
         ],
+      ),
+    );
+  }
+
+  Future<void> _logout() async {
+    try {
+      await AuthService.instance.logout();
+    } catch (_) {}
+    if (!mounted) return;
+    Navigator.pushNamedAndRemoveUntil(context, '/login', (_) => false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text("Logged out successfully"),
+        backgroundColor: Colors.green,
       ),
     );
   }

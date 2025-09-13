@@ -1,13 +1,10 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
-import 'package:provider/provider.dart';
-
-import '../services/bluetooth_helper.dart';
-import '../services/ring_data_provider.dart';
 import '../widgets/custom_button.dart';
 import '../widgets/custom_snackbar.dart';
 import 'home_page.dart';
+import '../services/bluetooth_helper.dart';
 
 class BluetoothConnectPage extends StatefulWidget {
   const BluetoothConnectPage({super.key});
@@ -18,135 +15,88 @@ class BluetoothConnectPage extends StatefulWidget {
 
 class _BluetoothConnectPageState extends State<BluetoothConnectPage> {
   bool _scanning = false;
-  final List<BluetoothDevice> _devices = [];
+  final List<ScanResult> _devicesList = [];
 
+  /// Start scanning
   Future<void> _startScan() async {
     bool granted = await BluetoothHelper.requestPermissions();
     if (!granted) {
-      CustomSnackbar.show(
-        context,
-        "Bluetooth permissions not granted",
-        backgroundColor: Colors.red,
-      );
+      CustomSnackbar.show(context, "Bluetooth permissions not granted",
+          backgroundColor: Colors.red);
       return;
     }
 
     var state = await FlutterBluePlus.adapterState.first;
     if (state != BluetoothAdapterState.on) {
-      CustomSnackbar.show(
-        context,
-        "Please enable Bluetooth",
-        backgroundColor: Colors.red,
-      );
+      CustomSnackbar.show(context, "Please enable Bluetooth",
+          backgroundColor: Colors.red);
       return;
     }
 
     setState(() {
       _scanning = true;
-      _devices.clear();
+      _devicesList.clear();
     });
 
-    await FlutterBluePlus.startScan(timeout: const Duration(seconds: 8));
+    FlutterBluePlus.startScan(timeout: const Duration(seconds: 5));
 
     FlutterBluePlus.scanResults.listen((results) {
-      for (ScanResult r in results) {
-        if (!_devices.contains(r.device)) {
-          setState(() => _devices.add(r.device));
+      for (var r in results) {
+        if (!_devicesList.any((d) => d.device.id == r.device.id)) {
+          debugPrint(
+              "Found device: ${r.advertisementData.localName.isNotEmpty ? r.advertisementData.localName : r.device.name} (${r.device.id})");
+          setState(() => _devicesList.add(r));
         }
       }
+    }).onError((e) {
+      CustomSnackbar.show(context, "Scan error: $e",
+          backgroundColor: Colors.red);
     });
 
-    Future.delayed(const Duration(seconds: 8), () {
-      FlutterBluePlus.stopScan();
-      if (mounted) setState(() => _scanning = false);
+    FlutterBluePlus.isScanning.listen((scanning) {
+      setState(() => _scanning = scanning);
     });
   }
 
-  Future<void> _connectToDevice(BluetoothDevice device) async {
+  /// Connect to device and go to HomePage
+  Future<void> _connectToDevice(ScanResult result) async {
     try {
-      await device.connect();
+      FlutterBluePlus.stopScan();
+
+      final displayName = result.advertisementData.localName.isNotEmpty
+          ? result.advertisementData.localName
+          : (result.device.name.isNotEmpty ? result.device.name : "Unknown");
+
+      debugPrint("Connecting to $displayName (${result.device.id})...");
+      await result.device.connect(timeout: const Duration(seconds: 10));
+
+      CustomSnackbar.show(context, "Connected to $displayName",
+          backgroundColor: Colors.green);
+
       if (mounted) {
-        CustomSnackbar.show(
-          context,
-          "Connected to ${device.name.isNotEmpty ? device.name : "device"}",
-          backgroundColor: Colors.green,
-        );
-
-        // ✅ Discover services & subscribe
-        List<BluetoothService> services = await device.discoverServices();
-        for (var service in services) {
-          for (var characteristic in service.characteristics) {
-            final uuid = characteristic.uuid.toString();
-
-            // 🫀 Heart Rate (UUID 0x2A37 usually)
-            if (uuid.contains("2a37")) {
-              await characteristic.setNotifyValue(true);
-              characteristic.lastValueStream.listen((value) {
-                if (value.isNotEmpty) {
-                  int hr = value[1]; // byte 1 → heart rate value
-                  Provider.of<RingDataProvider>(context, listen: false)
-                      .updateHeartRate(hr);
-                }
-              });
-            }
-
-            // 🔋 Battery Level (UUID 0x2A19)
-            else if (uuid.contains("2a19")) {
-              await characteristic.setNotifyValue(true);
-              characteristic.lastValueStream.listen((value) {
-                if (value.isNotEmpty) {
-                  int battery = value[0]; // byte 0 → battery %
-                  Provider.of<RingDataProvider>(context, listen: false)
-                      .updateBatteryLevel(battery);
-                }
-              });
-            }
-
-            // 👣 Steps (replace UUID with your ring’s actual UUID)
-            else if (uuid.contains("xxxx")) {
-              await characteristic.setNotifyValue(true);
-              characteristic.lastValueStream.listen((value) {
-                int steps = _bytesToInt(value);
-                Provider.of<RingDataProvider>(context, listen: false)
-                    .updateSteps(steps);
-              });
-            }
-          }
-        }
-
-        // ✅ Go to HomePage
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (_) => const HomePage()),
+          MaterialPageRoute(
+            builder: (_) => HomePage(device: result.device),
+          ),
         );
       }
     } catch (e) {
-      CustomSnackbar.show(
-        context,
-        "Connection failed: $e",
-        backgroundColor: Colors.red,
-      );
+      debugPrint("Connection failed: $e");
+      CustomSnackbar.show(context, "Connection failed: $e",
+          backgroundColor: Colors.red);
     }
-  }
-
-  int _bytesToInt(List<int> bytes) {
-    int result = 0;
-    for (int i = 0; i < bytes.length; i++) {
-      result |= (bytes[i] << (8 * i));
-    }
-    return result;
   }
 
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
+    double radarRadius = size.width * 0.35;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          "DePixel Radar",
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
+        title: const Text("DePixel Radar",
+            style: TextStyle(fontWeight: FontWeight.bold)),
         centerTitle: true,
         backgroundColor: Colors.white,
         foregroundColor: Colors.black,
@@ -155,62 +105,57 @@ class _BluetoothConnectPageState extends State<BluetoothConnectPage> {
       body: Column(
         children: [
           Expanded(
-            child: Center(
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  // Radar background image
-                  Image.asset(
-                    "assets/images/ring_center.png",
-                    width: size.width * 0.9,
-                  ),
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                Image.asset("assets/images/ring_center.png",
+                    width: size.width * 0.85),
+                ..._devicesList.asMap().entries.map((entry) {
+                  int index = entry.key;
+                  ScanResult result = entry.value;
 
-                  // Devices plotted around
-                  ..._devices.asMap().entries.map((entry) {
-                    int index = entry.key;
-                    BluetoothDevice device = entry.value;
+                  final displayName = result.advertisementData.localName.isNotEmpty
+                      ? result.advertisementData.localName
+                      : (result.device.name.isNotEmpty
+                      ? result.device.name
+                      : "Unknown");
 
-                    double angle =
-                        (2 * pi / (_devices.isEmpty ? 1 : _devices.length)) *
-                            index;
-                    double radius = 120;
+                  double angle = (2 * pi / _devicesList.length) * index;
+                  double radius = radarRadius * 0.8;
+                  double x = (size.width / 2) + radius * cos(angle) - 20;
+                  double y = (size.height / 2.5) + radius * sin(angle) - 20;
 
-                    return Positioned(
-                      left: (size.width / 2) + radius * cos(angle) - 20,
-                      top: (size.height / 3) + radius * sin(angle) - 20,
-                      child: GestureDetector(
-                        onTap: () => _connectToDevice(device),
-                        child: Column(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.all(6),
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                    color: Colors.purple, width: 2),
-                              ),
-                              child: Image.asset(
-                                "assets/images/ring_small.png",
-                                height: 40,
-                              ),
+                  return Positioned(
+                    left: x,
+                    top: y,
+                    child: GestureDetector(
+                      onTap: () => _connectToDevice(result),
+                      child: Column(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(6),
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.purple, width: 2),
                             ),
-                            Text(
-                              device.name.isNotEmpty
-                                  ? device.name
-                                  : "Unknown",
-                              style: const TextStyle(fontSize: 10),
-                            ),
-                          ],
-                        ),
+                            child: Image.asset("assets/images/ring_small.png",
+                                height: 40),
+                          ),
+                          Text(
+                            displayName,
+                            style: const TextStyle(fontSize: 10),
+                          ),
+                          Text(result.device.id.toString(),
+                              style: const TextStyle(
+                                  fontSize: 8, color: Colors.grey)),
+                        ],
                       ),
-                    );
-                  }),
-                ],
-              ),
+                    ),
+                  );
+                }),
+              ],
             ),
           ),
-
-          // Bottom Scan button
           Padding(
             padding: const EdgeInsets.all(16.0),
             child: SizedBox(

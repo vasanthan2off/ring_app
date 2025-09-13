@@ -2,12 +2,14 @@ import 'package:flutter/material.dart';
 
 class CustomPasswordField extends StatefulWidget {
   final TextEditingController controller;
+  final String? Function(String?)? validator; // ✅ Add validator
   final TextInputAction? textInputAction;
   final void Function(String)? onFieldSubmitted;
 
   const CustomPasswordField({
     super.key,
     required this.controller,
+    this.validator, // ✅ Accept validator
     this.textInputAction,
     this.onFieldSubmitted,
   });
@@ -24,6 +26,7 @@ class _CustomPasswordFieldState extends State<CustomPasswordField> {
     return TextFormField(
       controller: widget.controller,
       obscureText: _obscure,
+      validator: widget.validator, // ✅ Use validator here
       textInputAction: widget.textInputAction,
       onFieldSubmitted: widget.onFieldSubmitted,
       decoration: InputDecoration(

@@ -13,7 +13,7 @@ class AuthService {
   AuthService._();
   static final instance = AuthService._();
 
-  static const String baseUrl = "https://www.auth.nivaring.com";
+  static const String baseUrl = "http://192.168.86.3:8080";
 
   String? _accessToken;
   String? _refreshToken;

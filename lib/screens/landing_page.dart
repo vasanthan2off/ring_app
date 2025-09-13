@@ -40,7 +40,10 @@ class LandingPage extends StatelessWidget {
                     SizedBox(height: 12),
                     Text(
                       "Your secure companion for managing connections.\nTap below to continue.",
-                      style: TextStyle(fontSize: 16, color: Colors.grey),
+                      style: TextStyle(
+                        fontSize: 16,
+                        color: Colors.grey,
+                      ),
                       textAlign: TextAlign.center,
                     ),
                   ],
@@ -53,9 +56,11 @@ class LandingPage extends StatelessWidget {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
+                    // Cannot be const because onPressed is dynamic
                     CustomButton(
                       text: "Get Started",
-                      onPressed: () => Navigator.pushNamed(context, '/login'),
+                      onPressed: () =>
+                          Navigator.pushNamed(context, '/login'),
                     ),
                     const SizedBox(height: 40),
                   ],
