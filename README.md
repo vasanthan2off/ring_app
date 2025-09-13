@@ -49,10 +49,10 @@ lib/
 
 ```bash
 # Clone the repository
-git clone https://github.com/<your-username>/depixel_app.git
+git clone https://github.com/<your-username>/bleepkit.git
 
 # Navigate to project
-cd depixel_app
+cd bleepkit.git
 
 # Install dependencies
 flutter pub get
