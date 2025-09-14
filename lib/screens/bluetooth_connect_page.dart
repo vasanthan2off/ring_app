@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import '../widgets/custom_button.dart';
 import '../widgets/custom_snackbar.dart';
-import 'home_page.dart';
 import '../services/bluetooth_helper.dart';
 
 class BluetoothConnectPage extends StatefulWidget {
@@ -58,7 +57,7 @@ class _BluetoothConnectPageState extends State<BluetoothConnectPage> {
     });
   }
 
-  /// Connect to device and go to HomePage
+  /// Connect to device and go to RootPage (with bottom nav)
   Future<void> _connectToDevice(ScanResult result) async {
     try {
       FlutterBluePlus.stopScan();
@@ -74,11 +73,11 @@ class _BluetoothConnectPageState extends State<BluetoothConnectPage> {
           backgroundColor: Colors.green);
 
       if (mounted) {
-        Navigator.pushReplacement(
+        // ✅ Navigate into RootPage (with nav bar) instead of HomePage directly
+        Navigator.pushReplacementNamed(
           context,
-          MaterialPageRoute(
-            builder: (_) => HomePage(device: result.device),
-          ),
+          '/home',
+          arguments: result.device,
         );
       }
     } catch (e) {

@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+
 import '../services/auth_service.dart';
 import '../widgets/custom_button.dart';
+import '../services/ring_service.dart';
 
 class HomePage extends StatefulWidget {
-  final BluetoothDevice device; // ✅ passed from BluetoothConnectPage
+  final BluetoothDevice device;
   const HomePage({super.key, required this.device});
 
   @override
@@ -13,18 +15,13 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   Map<String, dynamic>? user;
-  int _currentIndex = 0;
-
-  // BLE values
-  String _deviceName = "";
-  String _statusMessage = "Connecting...";
-  int _heartRate = 0;
 
   @override
   void initState() {
     super.initState();
     _loadUser();
-    _connectToDevice();
+    // ✅ Use RingService to connect
+    RingService.instance.connectToDevice(widget.device);
   }
 
   Future<void> _loadUser() async {
@@ -38,56 +35,9 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  Future<void> _connectToDevice() async {
-    try {
-      await widget.device.connect(autoConnect: false);
-      setState(() => _statusMessage = "Connected ✅");
-
-      final services = await widget.device.discoverServices();
-
-      for (var service in services) {
-        // ✅ Try to read Device Name (0x2A00 inside Device Info Service 0x180A)
-        if (service.uuid.toString().toLowerCase().contains("180a")) {
-          for (var c in service.characteristics) {
-            if (c.uuid.toString().toLowerCase().contains("2a00")) {
-              final nameBytes = await c.read();
-              setState(() {
-                _deviceName = String.fromCharCodes(nameBytes);
-              });
-            }
-          }
-        }
-
-        // ✅ Heart Rate Service (0x180D) -> Measurement (0x2A37)
-        if (service.uuid.toString().toLowerCase().contains("180d")) {
-          for (var c in service.characteristics) {
-            if (c.uuid.toString().toLowerCase().contains("2a37")) {
-              await c.setNotifyValue(true);
-
-              c.lastValueStream.listen((value) {
-                if (value.isNotEmpty) {
-                  // Just take the first byte
-                  int bpm = value[0];
-                  debugPrint("Raw data from ring: $value -> BPM: $bpm");
-
-                  setState(() {
-                    _heartRate = bpm;
-                    _statusMessage = "Heart Rate: $bpm bpm";
-                  });
-                }
-              });
-            }
-          }
-        }
-      }
-    } catch (e) {
-      setState(() => _statusMessage = "Error: $e");
-    }
-  }
-
   @override
   void dispose() {
-    widget.device.disconnect();
+    RingService.instance.disconnect();
     super.dispose();
   }
 
@@ -99,7 +49,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _infoCard(String title, String value,
-      {String suffix = "", bool isLarge = false}) {
+      {String suffix = "", bool isLarge = false, Color? color}) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -125,7 +75,7 @@ class _HomePageState extends State<HomePage> {
             style: TextStyle(
               fontSize: isLarge ? 22 : 18,
               fontWeight: FontWeight.bold,
-              color: Colors.black,
+              color: color ?? Colors.black,
             ),
           ),
         ],
@@ -149,12 +99,6 @@ class _HomePageState extends State<HomePage> {
         ? "${user!['first_name'] ?? ''} ${user!['last_name'] ?? ''}"
         : "Fetching...";
 
-    final titleName = _deviceName.isNotEmpty
-        ? _deviceName
-        : (widget.device.platformName.isNotEmpty
-        ? widget.device.platformName
-        : "Unknown Device");
-
     return Scaffold(
       backgroundColor: const Color(0xfff9f9f9),
       appBar: AppBar(
@@ -165,8 +109,11 @@ class _HomePageState extends State<HomePage> {
           children: [
             Image.asset("assets/images/ring_logo.png", height: 32),
             const SizedBox(width: 8),
-            Text(titleName,
-                style: const TextStyle(color: Colors.black, fontSize: 16)),
+            // Hardcode device name for now
+            const Text(
+              "Depixel Ring",
+              style: TextStyle(color: Colors.black, fontSize: 16),
+            ),
           ],
         ),
         actions: [
@@ -214,8 +161,12 @@ class _HomePageState extends State<HomePage> {
             ),
 
             const SizedBox(height: 16),
-            Text("Status: $_statusMessage",
-                style: const TextStyle(color: Colors.grey)),
+
+            // Hardcode status for now
+            const Text(
+              "Status: Connected ✅",
+              style: TextStyle(color: Colors.grey),
+            ),
 
             const SizedBox(height: 24),
 
@@ -224,24 +175,35 @@ class _HomePageState extends State<HomePage> {
             Row(
               children: [
                 Expanded(
-                  child: _infoCard("Heart Rate", "$_heartRate", suffix: " bpm", isLarge: true),
+                  // ✅ Heart rate from RingService
+                  child: ValueListenableBuilder(
+                    valueListenable: RingService.instance.heartRate,
+                    builder: (_, bpm, __) => _infoCard(
+                      "Heart Rate",
+                      "$bpm",
+                      suffix: " bpm",
+                      isLarge: true,
+                    ),
+                  ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: _infoCard("Steps", "0", isLarge: true), // placeholder
+                  child: _infoCard("Steps", "1200", isLarge: true), // hardcoded
                 ),
               ],
             ),
+
             const SizedBox(height: 24),
 
-            /// Sleep Section (static placeholder)
+            /// Sleep Section
             _sectionTitle("Sleep"),
-            _infoCard("Sleep Score", "85", isLarge: true),
+            _infoCard("Sleep Score", "85", isLarge: true), // hardcoded
+
             const SizedBox(height: 24),
 
-            /// Ring Section (placeholder)
+            /// Ring Section
             _sectionTitle("Ring"),
-            _infoCard("Battery", "0%", isLarge: true),
+            _infoCard("Battery", "75", suffix: "%", isLarge: true), // hardcoded
 
             const SizedBox(height: 32),
 
@@ -253,25 +215,6 @@ class _HomePageState extends State<HomePage> {
           ],
         ),
       ),
-
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _currentIndex,
-        onTap: (i) => setState(() => _currentIndex = i),
-        selectedItemColor: Colors.purple,
-        unselectedItemColor: Colors.grey,
-        showSelectedLabels: false,
-        showUnselectedLabels: false,
-        type: BottomNavigationBarType.fixed,
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home), label: "Home"),
-          BottomNavigationBarItem(
-              icon: Icon(Icons.favorite_border), label: "Health"),
-          BottomNavigationBarItem(
-              icon: Icon(Icons.chat_bubble_outline), label: "Chat"),
-          BottomNavigationBarItem(
-              icon: Icon(Icons.person_outline), label: "Profile"),
-        ],
-      ),
     );
   }
 
@@ -280,6 +223,7 @@ class _HomePageState extends State<HomePage> {
       await AuthService.instance.logout();
     } catch (_) {}
     if (!mounted) return;
+
     Navigator.pushNamedAndRemoveUntil(context, '/login', (_) => false);
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
